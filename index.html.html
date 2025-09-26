@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>مالی‌چت — دستیار مالی</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Vazirmatn', system-ui, sans-serif; background: #f7fafc; }
+    .chat-scroll { max-height: 60vh; overflow:auto; }
+    .bubble { white-space:pre-wrap; }
+    /* custom small scrollbar for better UX */
+    .chat-scroll::-webkit-scrollbar { width:8px; height:8px }
+    .chat-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius:8px }
+  </style>
+</head>
+<body class="h-screen flex items-center justify-center p-4">
+  <div class="w-full max-w-6xl h-full bg-white shadow-lg rounded-2xl overflow-hidden grid grid-cols-1 md:grid-cols-3">
+    <!-- Sidebar -->
+    <aside class="col-span-1 md:col-span-1 border-l md:border-l-0 border-gray-100 p-4 flex flex-col">
+      <div class="flex items-center justify-between mb-4">
+        <h1 class="text-lg font-semibold">💬 مالی‌چت</h1>
+        <button id="newChatBtn" class="text-sm bg-blue-600 text-white px-3 py-1 rounded-md">چت جدید</button>
+      </div>
+
+      <div class="flex-1 overflow-auto" id="chatsList">
+        <!-- chat items injected here -->
+      </div>
+
+      <div class="mt-4 text-xs text-gray-500">
+        <div>حافظه: ذخیره‌شده در مرورگر شما (localStorage)</div>
+        <div class="mt-2">نکته: این نسخه به‌صورت محلی کار می‌کند و نیازی به کلید API ندارد.</div>
+      </div>
+    </aside>
+
+    <!-- Main chat -->
+    <main class="col-span-2 p-6 flex flex-col">
+      <div class="mb-4 flex items-center justify-between">
+        <div>
+          <h2 id="chatTitle" class="text-2xl font-bold">سلام! من مالی‌چت هستم 🤝</h2>
+          <p id="chatSubtitle" class="text-sm text-gray-500">هر سوال مالی دارید بپرسید — بودجه، پس‌انداز، سرمایه‌گذاری و برنامه‌ریزی</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="clearHistory" class="px-3 py-1 rounded border text-sm">پاک کردن همه چت‌ها</button>
+        </div>
+      </div>
+
+      <div class="flex-1 border rounded-lg p-4 bg-gray-50 flex flex-col">
+        <div id="messages" class="chat-scroll flex-1 space-y-3 mb-3" aria-live="polite">
+          <!-- messages go here -->
+        </div>
+
+        <form id="inputForm" class="flex gap-3 items-end">
+          <textarea id="userInput" rows="2" placeholder="پیام خود را بنویسید... (مثال: بودجه ماهیانه من رو برنامه‌ریزی کن)"></textarea>
+          <div class="flex flex-col gap-2">
+            <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-md">ارسال</button>
+            <button type="button" id="actionPlanBtn" class="bg-yellow-500 text-black px-3 py-1 rounded-md text-sm">ایجاد برنامه مالی</button>
+          </div>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // Simple single-file "AI" assistant implemented in JS.
+    // تمام متن‌ها فارسی است. چت‌ها در localStorage ذخیره می‌شوند. برنامه محاسباتی ساده برای بودجه/پس‌انداز دارد.
+
+    // Utilities
+    function $(sel){ return document.querySelector(sel) }
+    function saveChats(chats){ localStorage.setItem('mali_chats_v1', JSON.stringify(chats)) }
+    function loadChats(){ try{ return JSON.parse(localStorage.getItem('mali_chats_v1')) || [] }catch(e){ return [] } }
+
+    // Default sample chat
+    let chats = loadChats();
+    if(!chats.length){
+      chats = [{ id: Date.now(), title: 'چت اول', messages: [
+        { role:'assistant', text: 'سلام! من مالی‌چت هستم. هر سوال مالی دارید بپرسید — می‌تونم برای بودجه، پس‌انداز، برنامه‌ریزی سرمایه‌گذاری و محاسبات مالی کمک کنم.' }
+      ]}];
+      saveChats(chats);
+    }
+
+    let activeChatId = chats[0].id;
+
+    // Render chat list
+    function renderChatList(){
+      const container = $('#chatsList'); container.innerHTML = '';
+      chats.slice().reverse().forEach(chat => {
+        const div = document.createElement('div');
+        div.className = 'p-3 mb-2 rounded-lg cursor-pointer hover:bg-gray-100 flex items-center justify-between';
+        div.innerHTML = `<div>
+          <div class="font-medium">${escapeHtml(chat.title)}</div>
+          <div class="text-xs text-gray-400">${chat.messages.length} پیام</div>
+        </div>
+        <div class="flex gap-2 items-center">
+          <button data-id="${chat.id}" class="renameBtn text-xs text-blue-600">تغییر نام</button>
+          <button data-id="${chat.id}" class="deleteBtn text-xs text-red-500">حذف</button>
+        </div>`;
+        div.addEventListener('click', (e)=>{
+          const target = e.target;
+          if(target.classList.contains('renameBtn') || target.classList.contains('deleteBtn')) return;
+          setActiveChat(chat.id);
+        });
+        container.appendChild(div);
+      });
+
+      // attach delete / rename
+      container.querySelectorAll('.deleteBtn').forEach(b=> b.addEventListener('click', (e)=>{
+        e.stopPropagation(); const id = Number(b.dataset.id); if(!confirm('آیا می‌خواهید این چت را حذف کنید؟')) return;
+        chats = chats.filter(c=>c.id!==id); saveChats(chats); if(chats.length) setActiveChat(chats[0].id); else { chats = []; saveChats(chats); location.reload(); }
+      }));
+      container.querySelectorAll('.renameBtn').forEach(b=> b.addEventListener('click', (e)=>{
+        e.stopPropagation(); const id = Number(b.dataset.id); const newName = prompt('نام جدید چت را وارد کنید:'); if(!newName) return; const ch = chats.find(c=>c.id===id); ch.title = newName; saveChats(chats); renderChatList(); if(id===activeChatId) $('#chatTitle').textContent = newName;
+      }));
+    }
+
+    function escapeHtml(text){ return text.replace(/[&<>\"']/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"})[m] }) }
+
+    // Render active chat
+    function renderActiveChat(){
+      const chat = chats.find(c=>c.id===activeChatId);
+      if(!chat) return;
+      $('#chatTitle').textContent = chat.title || 'بدون نام';
+      const msgs = $('#messages'); msgs.innerHTML = '';
+      chat.messages.forEach(m => {
+        const wrapper = document.createElement('div');
+        if(m.role==='assistant'){
+          wrapper.className = 'self-start max-w-xl bg-white p-3 rounded-xl shadow-sm';
+          wrapper.innerHTML = `<div class="bubble text-sm">${escapeHtml(m.text)}</div>`;
+        } else {
+          wrapper.className = 'self-end max-w-xl bg-green-600 text-white p-3 rounded-xl ml-auto';
+          wrapper.innerHTML = `<div class="bubble text-sm">${escapeHtml(m.text)}</div>`;
+        }
+        msgs.appendChild(wrapper);
+      });
+      msgs.scrollTop = msgs.scrollHeight;
+    }
+
+    function setActiveChat(id){ activeChatId = id; renderChatList(); renderActiveChat(); }
+
+    // Simple Persian/number parsing helpers
+    function parsePersianNumber(str){
+      if(!str) return null;
+      str = str.replace(/٬|,/g,'').trim();
+      const persianDigits = '۰۱۲۳۴۵۶۷۸۹';
+      for(let i=0;i<10;i++) str = str.replace(new RegExp(persianDigits[i],'g'), String(i));
+      const m = str.match(/-?\d+(?:\.\d+)?/);
+      return m ? Number(m[0]) : null;
+    }
+
+    // Very simple "AI": rule-based responder for common finance tasks.
+    function assistantReply(userText){
+      const text = userText.toLowerCase();
+
+      // Greetings
+      if(/سلام|درود|hi|سلامی/.test(text)) return 'سلام! چه کمکی از دست مالی‌چت برمیاد؟ لطفاً بفرمایید نیازتان چیست: بودجه، پس‌انداز، سرمایه‌گذاری یا مشاوره کلی.';
+
+      // Budget planner intent
+      if(/بودجه|بودجه‌بندی|بودجه ر|بودجه ماه|هزینه ماهیانه/.test(text)){
+        // try to extract income and major expenses
+        const nums = (text.match(/-?\d+[\d\.,۰-۹]*/g) || []).map(s=>parsePersianNumber(s)).filter(n=>!isNaN(n));
+        if(nums.length>=1){
+          const income = nums[0];
+          // heuristic expenses sum: take other numbers as expenses
+          const expenses = nums.slice(1);
+          const sumExpenses = expenses.reduce((a,b)=>a+(b||0),0);
+          const recommendedSavings = Math.max(0, income - sumExpenses);
+          const savingRate = ((recommendedSavings/income)*100).toFixed(1);
+          return `طبق اعداد یافت‌شده:
+- درآمد ماهیانه: ${income.toLocaleString('fa-IR')} تومان
+- مجموع هزینه‌های ثبت‌شده: ${sumExpenses.toLocaleString('fa-IR')} تومان
+پیشنهاد می‌کنم حداقل ${Math.round(Math.min(0.3, recommendedSavings/income||0)*100)}% از درآمد را پس‌انداز کنید. (براساس داده‌های شما پیشنهاد پایه). ماندهٔ قابل پس‌انداز حدود ${recommendedSavings.toLocaleString('fa-IR')} تومان است.`;
+        } else {
+          return 'برای برنامه‌ریزی بودجه لطفاً درآمد ماهیانه و هزینه‌های اصلی‌تان را بنویسید. مثال: "درآمد ۳۰ میلیون، اجاره ۱۰ میلیون، قبوض ۲ میلیون".';
+        }
+      }
+
+      // Savings goal intent
+      if(/پس.?انداز|هدف پس.?انداز|هدف پس انداز|ذخیره/.test(text)){
+        // look for target and period and current saving
+        const nums = (text.match(/-?\d+[\d\.,۰-۹]*/g) || []).map(s=>parsePersianNumber(s)).filter(n=>!isNaN(n));
+        if(nums.length>=2){
+          const target = nums[0];
+          const months = nums[1];
+          const monthly = Math.ceil(target/months);
+          return `برای رسیدن به هدف ${target.toLocaleString('fa-IR')} تومان در ${months} ماه، لازم است هر ماه حداقل ${monthly.toLocaleString('fa-IR')} تومان کنار بگذارید.`;
+        } else {
+          return 'برای محاسبهٔ برنامهٔ پس‌انداز، مقدار هدف و تعداد ماه را بنویسید. مثال: "می‌خوام ۶۰ میلیون در ۱۲ ماه پس‌انداز کنم".';
+        }
+      }
+
+      // Investment simple advice
+      if(/سرمایه|سرمایه‌گذاری|سرمايه/.test(text)){
+        return 'برای سرمایه‌گذاری ابتدا سطح ریسک، افق زمانی و مبلغ قابل‌سرمایه‌گذاری را مشخص کنید. اگر دنبال گزینهٔ کم‌ریسک هستید: سپرده‌های بانکی کوتاه‌مدت یا صندوق‌های با درآمد ثابت؛ میان‌مدت/بلندمدت: صندوق‌های سهامی یا ترکیبی. من می‌توانم برای شما یک برنامه سادهٔ تخصیص دارایی پیشنهاد دهم اگر مبلغ و افق‌تان را بگویید.';
+      }
+
+      // Loan / debt
+      if(/قرض|وام|اقساط/.test(text)){
+        const nums = (text.match(/-?\d+[\d\.,۰-۹]*/g) || []).map(s=>parsePersianNumber(s)).filter(n=>!isNaN(n));
+        if(nums.length>=2){
+          const principal = nums[0];
+          const months = nums[1];
+          // assume example rate 18% annual
+          const annualRate = 0.18;
+          const monthlyRate = annualRate/12;
+          const payment = Math.ceil((principal * monthlyRate) / (1 - Math.pow(1+monthlyRate, -months)));
+          return `برای وام ${principal.toLocaleString('fa-IR')} تومان در ${months} ماه با نرخ سالانهٔ فرضی ${Math.round(annualRate*100)}%، قسط ماهیانه حدود ${payment.toLocaleString('fa-IR')} تومان خواهد بود. (این محاسبه تقریبی است.)`;
+        } else {
+          return 'برای محاسبهٔ قسط، مبلغ وام و تعداد ماه را وارد کنید. مثال: "وام ۲۰ میلیون برای ۲۴ ماه".';
+        }
+      }
+
+      // If user asks to create plan explicitly
+      if(/ایجاد برنامه|برنامه مالی|پلن/.test(text)){
+        return 'خوبه! برای ایجاد یک برنامهٔ مالی، لطفاً پاسخ دهید: ۱) درآمد ماهیانه (تومان) ۲) هزینه‌های ثابت ماهیانه (تومان) ۳) اهداف (مثلاً: پس‌انداز برای خرید خانه در ۳۶ ماه با مبلغ X)';
+      }
+
+      // If user asks for explanation/simple tips
+      if(/نکته|توصیه|مشاوره/.test(text)){
+        return 'چند نکتهٔ کلی:
+1) 50/30/20: حدود ۵۰٪ برای نیازها، ۳۰٪ خواسته‌ها، ۲۰٪ پس‌انداز/سرمایه‌گذاری.
+2) صندوق اضطراری معادل ۳-۶ ماه هزینهٔ ثابت داشته باشید.
+3) قبل از سرمایه‌گذاری، بدهی‌های پرهزینه (مثل کارت‌اعتباری با نرخ بالا) را کم کنید.';
+      }
+
+      // Fallback: try to do a light generative answer by pattern
+      return `متن شما دریافت شد: "${userText}"\nمن تلاش می‌کنم کمک کنم — اگر می‌خواهید برنامه‌ای مشخص بسازم بنویسید "برنامه" و اعداد موردنیاز را وارد کنید (درآمد و هزینه‌ها یا هدف و مدت).`;
+    }
+
+    // Adding messages to chat
+    function addMessageToActive(role, text){
+      const chat = chats.find(c=>c.id===activeChatId);
+      if(!chat) return;
+      chat.messages.push({ role, text }); saveChats(chats); renderActiveChat(); renderChatList();
+    }
+
+    // Handle user submission
+    $('#inputForm').addEventListener('submit', function(e){
+      e.preventDefault(); const input = $('#userInput'); const text = input.value.trim(); if(!text) return;
+      addMessageToActive('user', text);
+      input.value = '';
+      // simple simulated delay
+      setTimeout(()=>{
+        const reply = assistantReply(text);
+        addMessageToActive('assistant', reply);
+      }, 350);
+    });
+
+    // Action plan button starts a guided flow
+    $('#actionPlanBtn').addEventListener('click', ()=>{
+      const step1 = prompt('درآمد ماهیانه (تومان) را وارد کنید:'); if(!step1) return;
+      const income = parsePersianNumber(step1);
+      const step2 = prompt('هزینه‌های ثابت ماهیانه (جمع) (تومان) را وارد کنید:'); if(!step2) return;
+      const expenses = parsePersianNumber(step2);
+      const step3 = prompt('آیا هدف خاصی دارید؟ (مثلاً: جمع X در Y ماه) — اگر ندارید خالی بگذارید.');
+      addMessageToActive('user', `درخواست ایجاد برنامه: درآمد ${income||step1}، هزینه ${expenses||step2}، هدف: ${step3||'ندارد'}`);
+      // compute simple plan
+      const disposable = Math.max(0, (income||0) - (expenses||0));
+      let reply = `برنامهٔ پیشنهادی:
+- درآمد: ${(income||0).toLocaleString('fa-IR')} تومان
+- هزینه‌های ثابت: ${(expenses||0).toLocaleString('fa-IR')} تومان
+- مبلغ قابل تخصیص ماهیانه برای پس‌انداز/سرمایه‌گذاری: ${disposable.toLocaleString('fa-IR')} تومان\n`;
+      if(step3 && /\d/.test(step3)){
+        // try to extract numbers for goal
+        const nums = (step3.match(/-?\d+[\d\.,۰-۹]*/g)||[]).map(s=>parsePersianNumber(s)).filter(n=>!isNaN(n));
+        if(nums.length>=2){
+          const target = nums[0]; const months = nums[1]; const perMonth = Math.ceil(target/months);
+          reply += `هدف: ${target.toLocaleString('fa-IR')} در ${months} ماه → نیاز ماهیانه: ${perMonth.toLocaleString('fa-IR')} تومان\n`;
+          if(perMonth>disposable) reply += 'توجه: مبلغ لازم برای هدف بیشتر از مبلغ قابل تخصیص فعلی است. یا هزینه‌ها را کاهش دهید یا مدت را افزایش دهید.';
+        }
+      }
+      addMessageToActive('assistant', reply);
+    });
+
+    // New chat
+    $('#newChatBtn').addEventListener('click', ()=>{
+      const newChat = { id: Date.now(), title: 'چت جدید', messages: [{ role:'assistant', text: 'چت جدید ایجاد شد. چه کمکی از من برمی‌آید؟' }] };
+      chats.push(newChat); saveChats(chats); setActiveChat(newChat.id);
+    });
+
+    // Clear history
+    $('#clearHistory').addEventListener('click', ()=>{
+      if(!confirm('آیا می‌خواهید همهٔ چت‌ها پاک شوند؟ این عمل قابل بازگشت نیست.')) return;
+      localStorage.removeItem('mali_chats_v1'); chats = []; location.reload();
+    });
+
+    // Initial render
+    renderChatList(); renderActiveChat();
+
+    // Accessibility: focus textarea on load
+    $('#userInput').focus();
+  </script>
+</body>
+</html>
